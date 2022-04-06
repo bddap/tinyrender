@@ -57,9 +57,9 @@ fn line(mut put_pixel: impl FnMut(UVec2, Vec4), from: UVec2, to: UVec2, color: V
     let mut y = from.y;
     for x in (from.x)..to.x {
         if steep {
-            put_pixel(UVec2::new(x as u32, y as u32), color);
-        } else {
             put_pixel(UVec2::new(y as u32, x as u32), color);
+        } else {
+            put_pixel(UVec2::new(x as u32, y as u32), color);
         }
         error2 += derror2;
         if error2 > delta.x {
@@ -84,10 +84,7 @@ pub fn render2(img: &mut RgbaImage) {
 pub fn render2_(image_size: u32, mut put_pixel: impl FnMut(UVec2, Vec4)) {
     let obj: Obj = obj::load_obj(Cursor::new(include_bytes!("head.obj"))).unwrap();
 
-    let model_to_screen = |mut vert: Vec2| {
-        // didn't expect this swizzle to be needed, adding it as a hack
-        vert = vert.yx();
-
+    let model_to_screen = |vert: Vec2| {
         let ret: Vec2 =
             (vert + Vec2::new(1.0, 1.0)) * Vec2::new(1.0, 1.0) * image_size as f32 / 2.0;
         ret.as_uvec2().min(UVec2::ONE * (image_size - 1))

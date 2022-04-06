@@ -7,6 +7,7 @@ mod common;
 mod consts;
 mod lesson1;
 mod lesson2;
+mod lesson3;
 
 use consts::*;
 use structopt::StructOpt;
