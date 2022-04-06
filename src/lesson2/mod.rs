@@ -3,99 +3,102 @@ use std::io::Cursor;
 use crate::common::to_pixel;
 
 use super::consts::*;
-use glam::{UVec2, Vec2, Vec2Swizzles, Vec4};
+use glam::{IVec2, UVec2, Vec2, Vec2Swizzles, Vec4};
 use image::RgbaImage;
 use obj::Obj;
 
-pub fn render1(image: &mut RgbaImage) {
-    let (w, h) = image.dimensions();
-    assert!(w > 0);
-    assert!(h > 0);
-    assert!(h == w);
+pub fn render1(img: &mut RgbaImage) {
+    let (x, y) = img.dimensions();
+    assert_eq!(x, y);
+    render1_(x, |coords, color| {
+        img.put_pixel(coords.x, coords.y, to_pixel(color));
+    });
+}
 
+pub fn render1_(image_size: u32, mut put_pixel: impl FnMut(UVec2, Vec4)) {
     let lines = &[
         (UVec2::new(13, 20), UVec2::new(80, 40), white()),
         (UVec2::new(20, 13), UVec2::new(40, 80), red()),
         (UVec2::new(80, 40), UVec2::new(13, 20), red()),
     ];
 
-    let scale = UVec2::new(w, w) / 100;
+    let scale = UVec2::ONE * image_size / 100;
 
     for (from, to, color) in lines {
         let from = *from * scale;
         let to = *to * scale;
-        debug_assert!(from.x < w);
-        debug_assert!(to.x < w);
-        debug_assert!(from.y < h);
-        debug_assert!(to.y < h);
-        line(image, from, to, *color);
+        debug_assert!(from.x < image_size);
+        debug_assert!(to.x < image_size);
+        debug_assert!(from.y < image_size);
+        debug_assert!(to.y < image_size);
+        line(&mut put_pixel, from, to, *color);
     }
 }
 
-fn line(image: &mut RgbaImage, from: UVec2, to: UVec2, color: Vec4) {
-    let (w, h) = image.dimensions();
-    debug_assert!(from.x < w);
-    debug_assert!(to.x < w);
-    debug_assert!(from.y < h);
-    debug_assert!(to.y < h);
+fn line(mut put_pixel: impl FnMut(UVec2, Vec4), from: UVec2, to: UVec2, color: Vec4) {
+    let mut from: IVec2 = from.as_ivec2();
+    let mut to: IVec2 = to.as_ivec2();
 
-    let mut from = from;
-    let mut to = to;
-    let mut swizzle = [1, 0];
-
-    if abs_diff(from.x, to.x) < abs_diff(from.y, to.y) {
+    let delta = to - from;
+    let steep = delta.x.abs() < delta.y.abs();
+    if steep {
         from = from.yx();
         to = to.yx();
-        swizzle = [0, 1];
     }
 
     if from.x > to.x {
-        std::mem::swap(&mut from, &mut to);
+        std::mem::swap(&mut to, &mut from);
     }
 
-    debug_assert!(from.x <= to.x);
-    debug_assert!(from.y <= to.y);
+    let delta = to - from;
 
-    let diff = (to - from) * 1000;
-
-    for t in 0..(to.x - from.x) {
-        let ydiff = t * diff.y / diff.x;
-        let x = from.x + t;
-        let y = to.y + ydiff;
-
-        image.put_pixel(
-            swizzle[0] * x + swizzle[1] * y,
-            swizzle[0] * y + swizzle[1] * x,
-            to_pixel(color),
-        );
-    }
-}
-
-fn abs_diff(a: u32, b: u32) -> u32 {
-    if a < b {
-        b - a
-    } else {
-        a - b
+    let derror2 = delta.y.abs() * 2;
+    let mut error2 = 0;
+    let mut y = from.y;
+    for x in (from.x)..to.x {
+        if steep {
+            put_pixel(UVec2::new(x as u32, y as u32), color);
+        } else {
+            put_pixel(UVec2::new(y as u32, x as u32), color);
+        }
+        error2 += derror2;
+        if error2 > delta.x {
+            if delta.y > 0 {
+                y += 1;
+            } else {
+                y -= 1;
+            }
+            error2 -= delta.x * 2;
+        }
     }
 }
 
-pub fn render2(image: &mut RgbaImage) {
-    let (w, h) = image.dimensions();
-    assert!(w > 0);
-    assert!(h > 0);
-    assert!(h == w);
+pub fn render2(img: &mut RgbaImage) {
+    let (x, y) = img.dimensions();
+    assert_eq!(x, y);
+    render2_(x, |coords, color| {
+        img.put_pixel(coords.x, coords.y, to_pixel(color));
+    });
+}
 
+pub fn render2_(image_size: u32, mut put_pixel: impl FnMut(UVec2, Vec4)) {
     let obj: Obj = obj::load_obj(Cursor::new(include_bytes!("head.obj"))).unwrap();
 
-    let scale = (Vec2::new(w as f32, w as f32) + 1.0) / 2.0;
+    let model_to_screen = |mut vert: Vec2| {
+        // didn't expect this swizzle to be needed, adding it as a hack
+        vert = vert.yx();
+
+        let ret: Vec2 =
+            (vert + Vec2::new(1.0, 1.0)) * Vec2::new(1.0, 1.0) * image_size as f32 / 2.0;
+        ret.as_uvec2().min(UVec2::ONE * (image_size - 1))
+    };
 
     for face in faces(&obj) {
         let [a, b, c] = face;
-        let (a, b, c) = (a * scale, b * scale, c * scale);
-        let (a, b, c) = (a.as_uvec2(), b.as_uvec2(), c.as_uvec2());
-        line(image, a, b, white());
-        line(image, b, c, white());
-        line(image, c, a, white());
+        let (a, b, c) = (model_to_screen(a), model_to_screen(b), model_to_screen(c));
+        line(&mut put_pixel, a, b, white());
+        line(&mut put_pixel, b, c, white());
+        line(&mut put_pixel, c, a, white());
     }
 }
 
