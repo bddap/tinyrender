@@ -3,7 +3,7 @@ use std::io::Cursor;
 use crate::common::to_pixel;
 
 use super::consts::*;
-use glam::{IVec2, UVec2, Vec2, Vec2Swizzles, Vec4};
+use glam::{IVec2, UVec2, Vec2, Vec2Swizzles, Vec3};
 use image::RgbaImage;
 use obj::Obj;
 
@@ -15,7 +15,7 @@ pub fn render1(img: &mut RgbaImage) {
     });
 }
 
-pub fn render1_(image_size: u32, mut put_pixel: impl FnMut(UVec2, Vec4)) {
+pub fn render1_(image_size: u32, mut put_pixel: impl FnMut(UVec2, Vec3)) {
     let lines = &[
         (UVec2::new(13, 20), UVec2::new(80, 40), white()),
         (UVec2::new(20, 13), UVec2::new(40, 80), red()),
@@ -35,7 +35,7 @@ pub fn render1_(image_size: u32, mut put_pixel: impl FnMut(UVec2, Vec4)) {
     }
 }
 
-fn line(mut put_pixel: impl FnMut(UVec2, Vec4), from: UVec2, to: UVec2, color: Vec4) {
+fn line(mut put_pixel: impl FnMut(UVec2, Vec3), from: UVec2, to: UVec2, color: Vec3) {
     let mut from: IVec2 = from.as_ivec2();
     let mut to: IVec2 = to.as_ivec2();
 
@@ -81,8 +81,8 @@ pub fn render2(img: &mut RgbaImage) {
     });
 }
 
-pub fn render2_(image_size: u32, mut put_pixel: impl FnMut(UVec2, Vec4)) {
-    let obj: Obj = obj::load_obj(Cursor::new(include_bytes!("head.obj"))).unwrap();
+pub fn render2_(image_size: u32, mut put_pixel: impl FnMut(UVec2, Vec3)) {
+    let obj: Obj = obj::load_obj(Cursor::new(HEAD_OBJ_BYTES)).unwrap();
 
     let model_to_screen = |vert: Vec2| {
         let ret: Vec2 =

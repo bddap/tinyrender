@@ -8,6 +8,8 @@ mod consts;
 mod lesson1;
 mod lesson2;
 mod lesson3;
+mod lesson3_5;
+mod lesson3_6;
 
 use consts::*;
 use structopt::StructOpt;
