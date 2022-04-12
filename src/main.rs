@@ -1,7 +1,7 @@
 use std::{fs::File, io::BufWriter, path::PathBuf};
 
 use common::to_pixel;
-use image::{imageops::flip_vertical_in_place, ImageOutputFormat, RgbaImage};
+use image::{imageops::flip_vertical_in_place, ImageBuffer, ImageOutputFormat, Rgba, RgbaImage};
 
 mod common;
 mod consts;
@@ -10,9 +10,22 @@ mod lesson2;
 mod lesson3;
 mod lesson3_5;
 mod lesson3_6;
+mod lesson3_7;
 
 use consts::*;
 use structopt::StructOpt;
+
+pub const RENDERS: &[for<'r> fn(&'r mut ImageBuffer<Rgba<u8>, Vec<u8>>)] = &[
+    lesson1::render,
+    lesson2::render1,
+    lesson2::render2,
+    lesson3::triangles,
+    lesson3_5::triangles,
+    lesson3_6::triangles,
+    lesson3_6::triangles2,
+    lesson3_7::render,
+    lesson3_7::render,
+];
 
 #[derive(structopt::StructOpt)]
 struct Args {
