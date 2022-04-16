@@ -1,4 +1,5 @@
 use std::{
+    f32::consts::PI,
     io::Cursor,
     ops::{Add, Mul},
 };
@@ -60,27 +61,22 @@ fn render_(image_size: u32, frame: &mut Frame) {
 
     let screen_size = UVec2::splat(image_size);
 
-    let model_to_screen = Mat4::from_scale(Vec3::splat(image_size as f32) / 2.0)
-        * Mat4::from_translation(Vec3::splat(1.0));
+    let halfscreen = image_size as f32 / 2.0;
+
+    let model = Mat4::from_translation(Vec3::new(0.0, 0.0, -2.0));
+    let project = Mat4::perspective_lh(PI * 0.4, 1.0, 0.001, 1.0);
+    let viewport = Mat4::from_translation(Vec3::new(halfscreen, halfscreen, halfscreen))
+        * Mat4::from_scale(Vec3::new(halfscreen, -halfscreen, halfscreen));
+
+    let all = viewport * project * model;
 
     // let model_to_screen = perspective * a;
 
-    let to_screen = |vert: Vec3| {
-        // I still don't quite understand where perspective usually
-
-        // perspective
-        let camera_distance_from_origin = 6.0; // camera is at [0.0, 0.0, c] facing origin
-        let div = 1.0 - vert.z / camera_distance_from_origin;
-        let vert = vert / div;
-
-        // the rest
-        let vert = model_to_screen.transform_point3(vert);
-        vert
-    };
+    let to_screen = |vert: Vec3| all.project_point3(vert);
 
     let light_dir = Vec3::new(0.0, 0.0, -1.0).normalize();
 
-    for tri in model() {
+    for tri in load_model() {
         let face = tri.map(|(f, _uv)| f);
         let uvs = tri.map(|(_f, uv)| uv);
         let luma: f32 = normal(face).dot(light_dir);
@@ -169,7 +165,7 @@ fn normal(triangle: [Vec3; 3]) -> Vec3 {
 }
 
 // positions and texure coords
-fn model() -> Vec<([(Vec3, Vec2); 3])> {
+fn load_model() -> Vec<([(Vec3, Vec2); 3])> {
     let obj = parse_obj(Cursor::new(include_bytes!("head.obj"))).unwrap();
     let mut ret = Vec::<[(Vec3, Vec2); 3]>::new();
     for poly in obj.polygons {
