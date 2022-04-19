@@ -2,6 +2,12 @@ use glam::Vec3;
 use image::Rgba;
 
 pub fn to_pixel(color: Vec3) -> Rgba<u8> {
+    debug_assert!(color.x >= 0.0);
+    debug_assert!(color.y >= 0.0);
+    debug_assert!(color.z >= 0.0);
+    debug_assert!(color.x <= 1.0);
+    debug_assert!(color.y <= 1.0);
+    debug_assert!(color.z <= 1.0);
     let r = (color.x * (u8::max_value() as f32)) as u8;
     let g = (color.y * (u8::max_value() as f32)) as u8;
     let b = (color.z * (u8::max_value() as f32)) as u8;

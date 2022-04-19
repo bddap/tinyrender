@@ -62,46 +62,45 @@ fn render_(image_size: u32, frame: &mut Frame) {
     let screen_size = UVec2::splat(image_size);
     let halfscreen = image_size as f32 / 2.0;
 
-    let camera_pos = Vec3::new(1.0, 1.0, 0.0);
-    let model_pos = Vec3::new(0.0, 0.0, -2.0);
+    let camera_pos = Vec3::new(0.0, 0.0, 0.0);
+    let model_pos = Vec3::new(-0.5, -1.0, -2.0);
 
     let model = Mat4::from_translation(model_pos);
-    let view = Mat4::look_at_rh(camera_pos, model_pos, Vec3::Y).inverse();
-    let project = Mat4::perspective_lh(PI * 0.4, 1.0, 0.001, 1.0);
+    let view = Mat4::look_at_lh(camera_pos, model_pos, Vec3::Y);
+
+    // wavefrot obj uses a right handed coordinate system
+    let project = Mat4::perspective_rh(PI * 0.4, 1.0, 0.001, 1.0);
     let viewport = Mat4::from_translation(Vec3::new(halfscreen, halfscreen, halfscreen))
         * Mat4::from_scale(Vec3::new(halfscreen, -halfscreen, halfscreen));
 
-    let all = viewport * project * view * model;
-    let model_view = view * model;
-
     let model_normal_transform = model.inverse().transpose(); // why does this work??
 
-    let to_screen = |vert: Vec3| all.project_point3(vert);
+    let model_to_screen = viewport * project * view * model;
 
-    let light_dir = Vec3::new(0.6, -1.0, -1.0).normalize();
+    let light_direction = Vec3::new(1.0, -1.0, -1.0).normalize();
 
     for tri in load_model() {
         let face = tri.map(|(f, _uv, _n)| f);
-        let uvs = tri.map(|(_f, uv, _n)| uv);
         let normals = tri.map(|(_f, _uv, n)| n);
-        let lumas: [f32; 3] = normals.map(|norm| {
-            model_normal_transform
-                .transform_vector3(norm)
-                .dot(light_dir)
-        });
+        let uvs = tri.map(|(_f, uv, _n)| uv);
+        let normals_worldspace = normals.map(|n| model_normal_transform.transform_vector3(n));
 
-        let verts_modelviewed = face.map(|v| model_view.transform_vector3(v));
+        let verts = face.map(|v| model_to_screen.project_point3(v));
+        let derived_normal = normal(verts);
 
-        if normal(verts_modelviewed).z <= 0.0 {
-            let verts = face.map(|v| to_screen(v));
+        let lumas = normals_worldspace.map(|n| n.dot(light_direction) / 4.0 + 0.75);
+
+        if derived_normal.z <= 0.0 {
             let zs: Vec3 = verts.map(|v| v.z).into();
             let verts = verts.map(|v| v.xy().as_uvec2());
+
             for_coord_in_triangle(screen_size, verts, |pos, bar| {
                 let pix = frame.get_mut(pos.x, pos.y);
                 let z: f32 = bary_interp(bar, zs.to_array());
-                let uv: Vec2 = texsize - bary_interp(bar, uvs) * texsize;
-                let luma: f32 = -bary_interp(bar, lumas);
-                let color: Vec3 = tex.get_pixel(uv.x as u32, uv.y as u32).0.into();
+                let uv = (texsize - bary_interp(bar, uvs) * texsize).as_uvec2();
+                let color: Vec3 = tex.get_pixel(uv.x, uv.y).0.into();
+
+                let luma = bary_interp(bar, lumas);
                 if pix.w < z {
                     *pix = (color * luma).extend(z);
                 }
