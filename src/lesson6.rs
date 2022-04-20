@@ -1,7 +1,7 @@
 use std::{
     f32::consts::PI,
     io::Cursor,
-    ops::{Add, Mul},
+    ops::{Add, Mul, Neg},
 };
 
 use crate::common::to_pixel;
@@ -91,6 +91,7 @@ struct Gourad {
     model_to_screen: Mat4,
     model_normal_transform: Mat4,
     texture: image::Rgb32FImage,
+    normal_map: image::Rgb32FImage,
     texsize: Vec2,
     light_direction: Vec3,
 }
@@ -100,14 +101,20 @@ impl Gourad {
         model_to_screen: Mat4,
         model_normal_transform: Mat4,
         texture: image::Rgb32FImage,
+        normal_map: image::Rgb32FImage,
         light_direction: Vec3,
     ) -> Self {
         let texsize = Vec2::new(texture.width() as f32, texture.height() as f32);
+        assert_eq!(
+            (texture.width(), texture.height()),
+            (normal_map.width(), normal_map.height())
+        );
         debug_assert!((light_direction - light_direction.normalize()).length() < 0.0001);
         Self {
             model_to_screen,
             model_normal_transform,
             texture,
+            normal_map,
             texsize,
             light_direction,
         }
@@ -127,7 +134,9 @@ impl Shader for Gourad {
     fn fragment(&self, interp: Self::Intermediate) -> Option<Vec3> {
         let (px, py) = (interp.uv.x as u32, interp.uv.y as u32);
         let color: Vec3 = self.texture.get_pixel(px, py).0.into();
-        let intensity = interp.normal.dot(-self.light_direction).max(0.0);
+        let mnormal: Vec3 = self.normal_map.get_pixel(px, py).0.into();
+        let normal = self.model_normal_transform.transform_vector3(mnormal);
+        let intensity = normal.dot(self.light_direction).neg().max(0.0);
         debug_assert!(intensity <= 1.0 && intensity >= 0.0);
         Some(color * intensity)
     }
@@ -177,25 +186,26 @@ pub fn render(img: &mut RgbaImage) {
 fn render_(image_size: u32, frame: &mut Frame) {
     let halfscreen = image_size as f32 / 2.0;
 
-    let camera_pos = Vec3::new(0.0, 0.0, 0.0);
-    let model_pos = Vec3::new(-0.5, -1.0, -2.0);
+    let camera_pos = Vec3::new(0.4, 0.3, 3.0);
+    let model_pos = Vec3::new(0.0, 0.0, 0.0);
+    let model_scale = Vec3::splat(1.0);
 
-    let model = Mat4::from_translation(model_pos);
+    let model = Mat4::from_translation(model_pos) * Mat4::from_scale(model_scale);
     let view = Mat4::look_at_lh(camera_pos, model_pos, Vec3::Y);
 
-    // wavefrot obj uses a right handed coordinate system
-    let project = Mat4::perspective_rh(PI * 0.4, 1.0, 0.001, 1.0);
+    let project = Mat4::perspective_rh(PI * 0.25, 1.0, 0.001, 1.0);
     let viewport = Mat4::from_translation(Vec3::new(halfscreen, halfscreen, halfscreen))
         * Mat4::from_scale(Vec3::new(halfscreen, -halfscreen, halfscreen));
 
-    let model_normal_transform = model.inverse().transpose(); // why does this work??
+    let model_normal_transform = model.inverse().transpose();
     let model_to_screen = viewport * project * view * model;
-    let light_direction = Vec3::new(-1.0, -1.0, -1.0).normalize();
+    let light_direction = Vec3::new(0.0, -1.0, -0.5).normalize();
 
     let shader = Gourad::new(
         model_to_screen,
         model_normal_transform,
         texture(),
+        normal_map(),
         light_direction,
     );
     shader.run(frame, &load_model())
@@ -270,7 +280,7 @@ fn load_model() -> Vec<([(Vec3, Vec2, Vec3); 3])> {
                     (
                         Vec4::from(obj.positions[p]).xyz(),
                         Vec3::from(obj.tex_coords[t]).xy(),
-                        Vec3::from(obj.normals[n]),
+                        Vec3::from(obj.normals[n]).normalize(),
                     )
                 });
                 ret.push(face);
@@ -293,10 +303,23 @@ fn load_model() -> Vec<([(Vec3, Vec2, Vec3); 3])> {
 }
 
 fn texture() -> image::Rgb32FImage {
-    let mut tex =
-        image::load_from_memory_with_format(include_bytes!("head_diffuse.png"), ImageFormat::Png)
-            .unwrap()
-            .to_rgb32f();
+    let bs = include_bytes!("head_diffuse.png");
+    let mut tex = image::load_from_memory_with_format(bs, ImageFormat::Png)
+        .unwrap()
+        .to_rgb32f();
     flip_vertical_in_place(&mut tex);
+    tex
+}
+
+fn normal_map() -> image::Rgb32FImage {
+    let bs = include_bytes!("head_nm.png");
+    let mut tex = image::load_from_memory_with_format(bs, ImageFormat::Png)
+        .unwrap()
+        .to_rgb32f();
+    flip_vertical_in_place(&mut tex);
+    for p in tex.pixels_mut() {
+        let v: Vec3 = p.0.into();
+        p.0 = v.normalize().into();
+    }
     tex
 }
