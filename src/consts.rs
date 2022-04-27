@@ -16,4 +16,4 @@ pub fn black() -> Vec3 {
     Vec3::new(0.0, 0.0, 0.0)
 }
 
-pub const HEAD_OBJ_BYTES: &[u8] = include_bytes!("head.obj");
+pub const HEAD_OBJ_BYTES: &[u8] = include_bytes!("./obj/african_head/african_head.obj");

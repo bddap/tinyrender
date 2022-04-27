@@ -266,7 +266,10 @@ fn normal(triangle: [Vec3; 3]) -> Vec3 {
 
 // (position, texure coords, normal)
 fn load_model() -> Vec<([(Vec3, Vec2, Vec3); 3])> {
-    let obj = parse_obj(Cursor::new(include_bytes!("head.obj"))).unwrap();
+    let obj = parse_obj(Cursor::new(include_bytes!(
+        "./obj/african_head/african_head.obj"
+    )))
+    .unwrap();
     let mut ret = Vec::<[(Vec3, Vec2, Vec3); 3]>::new();
     for poly in obj.polygons {
         match poly {
@@ -303,7 +306,7 @@ fn load_model() -> Vec<([(Vec3, Vec2, Vec3); 3])> {
 }
 
 fn texture() -> image::Rgb32FImage {
-    let bs = include_bytes!("head_diffuse.png");
+    let bs = include_bytes!("./obj/african_head/african_head_diffuse.png");
     let mut tex = image::load_from_memory_with_format(bs, ImageFormat::Png)
         .unwrap()
         .to_rgb32f();
@@ -312,7 +315,7 @@ fn texture() -> image::Rgb32FImage {
 }
 
 fn normal_map() -> image::Rgb32FImage {
-    let bs = include_bytes!("head_nm.png");
+    let bs = include_bytes!("./obj/african_head/african_head_nm.png");
     let mut tex = image::load_from_memory_with_format(bs, ImageFormat::Png)
         .unwrap()
         .to_rgb32f();

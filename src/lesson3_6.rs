@@ -15,7 +15,10 @@ pub fn triangles(img: &mut RgbaImage) {
 }
 
 pub fn render(image_size: u32, mut put_pixel: impl FnMut(UVec2, Vec3)) {
-    let obj: Obj = obj::load_obj(Cursor::new(include_bytes!("head.obj"))).unwrap();
+    let obj: Obj = obj::load_obj(Cursor::new(include_bytes!(
+        "./obj/african_head/african_head.obj"
+    )))
+    .unwrap();
 
     let model_to_screen = |vert: Vec3| -> UVec2 {
         let ret: Vec2 =
@@ -41,7 +44,10 @@ pub fn triangles2(img: &mut RgbaImage) {
 }
 
 pub fn render2(image_size: u32, mut put_pixel: impl FnMut(UVec2, Vec3)) {
-    let obj: Obj = obj::load_obj(Cursor::new(include_bytes!("head.obj"))).unwrap();
+    let obj: Obj = obj::load_obj(Cursor::new(include_bytes!(
+        "./obj/african_head/african_head.obj"
+    )))
+    .unwrap();
 
     let model_to_screen = |vert: Vec3| -> UVec2 {
         let ret: Vec2 =
