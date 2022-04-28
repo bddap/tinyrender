@@ -11,20 +11,21 @@ use image::{imageops::flip_vertical_in_place, ImageFormat, RgbaImage};
 use obj::raw::{object::Polygon, parse_obj};
 use tap::Conv;
 
-struct Gourad {
+struct Main {
     model_to_screen: Mat4,
     model_normal_transform: Mat4,
     texture: image::Rgb32FImage,
     tangent_space_normal_map: image::Rgb32FImage,
     texsize: Vec2,
     light_direction: Vec3,
+    shadow_map: ShadowMap,
+    shadow_map_out: Frame,
+    shadow_map_out_size: Vec2,
 }
 
-impl Shader for Gourad {
-    type Varying = GouradVarying;
-
-    // verts
-    type Intermediate = GouradIntermediate;
+impl Shader for Main {
+    type Varying = MainVarying;
+    type Intermediate = MainIntermediate;
 
     fn vertex(
         &self,
@@ -33,11 +34,17 @@ impl Shader for Gourad {
         uv: Vec2,
     ) -> (Vec3, Self::Varying, Self::Intermediate) {
         let pos = self.model_to_screen.project_point3(vert);
+        let shadow_pos = self.shadow_map.model_to_screen.project_point3(vert);
         let normal = self.model_normal_transform.transform_vector3(normal);
         (
             pos,
-            GouradVarying { normal, uv, pos },
-            GouradIntermediate { uv, pos },
+            MainVarying {
+                normal,
+                uv,
+                pos,
+                shadow_pos,
+            },
+            MainIntermediate { uv, pos },
         )
     }
 
@@ -57,74 +64,37 @@ impl Shader for Gourad {
         .neg()
         .max(0.0);
 
-        Some((color * diff).min(Vec3::splat(1.0)))
+        let mut brightness = 0.4;
+
+        let (spx, spy) = (interp.shadow_pos.x as u32, interp.shadow_pos.y as u32);
+        if let Some(shadow_px) = self.shadow_map_out.try_get(spx, spy) {
+            if (interp.shadow_pos.z + 0.00001) >= shadow_px.z {
+                brightness += 0.6;
+            }
+        }
+
+        debug_assert!(brightness <= 1.0);
+
+        Some((color * brightness).min(Vec3::splat(1.0)))
     }
 }
 
-struct LightMap {
+struct ShadowMap {
     model_to_screen: Mat4,
 }
 
-impl Shader for LightMap {
-    type Varying = Nothing;
+impl Shader for ShadowMap {
+    type Varying = Vec3;
     type Intermediate = Nothing;
 
-    fn vertex(
-        &self,
-        vert: Vec3,
-        normal: Vec3,
-        uv: Vec2,
-    ) -> (Vec3, Self::Varying, Self::Intermediate) {
-        (self.model_to_screen.project_point3(vert), Nothing, Nothing)
+    fn vertex(&self, vert: Vec3, _: Vec3, _: Vec2) -> (Vec3, Self::Varying, Self::Intermediate) {
+        let pos = self.model_to_screen.project_point3(vert);
+        (pos, pos, Nothing)
     }
 
-    fn fragment(&self, _: Self::Varying, _: [Self::Intermediate; 3]) -> Option<Vec3> {
-        Some(Vec3::splat(1.0))
+    fn fragment(&self, interp: Self::Varying, _: [Self::Intermediate; 3]) -> Option<Vec3> {
+        Some(interp)
     }
-}
-
-#[derive(Clone)]
-struct Nothing;
-
-impl Copy for Nothing {}
-
-impl Mul<f32> for Nothing {
-    type Output = Self;
-
-    fn mul(self, _: f32) -> Self::Output {
-        Self
-    }
-}
-
-impl Add for Nothing {
-    type Output = Self;
-
-    fn add(self, _: Self) -> Self {
-        Self
-    }
-}
-
-// I don't understand this math.
-fn from_tangent_space(
-    uvs: [Vec2; 3],
-    base_normal: Vec3,
-    tangent_space_normal: Vec3,
-    verts_screenspace: [Vec3; 3],
-) -> Vec3 {
-    debug_assert!(is_normalized(base_normal));
-    debug_assert!(is_normalized(tangent_space_normal));
-
-    let ai = Mat3::from_cols(
-        verts_screenspace[1] - verts_screenspace[0],
-        verts_screenspace[2] - verts_screenspace[0],
-        base_normal,
-    )
-    .transpose()
-    .inverse();
-    let i: Vec3 = ai * Vec3::new(uvs[1].x - uvs[0].x, uvs[2].x - uvs[0].x, 0.0);
-    let j: Vec3 = ai * Vec3::new(uvs[1].y - uvs[0].y, uvs[2].y - uvs[0].y, 0.0);
-
-    Mat3::from_cols(i.normalize(), j.normalize(), base_normal) * tangent_space_normal
 }
 
 pub fn render(img: &mut RgbaImage) {
@@ -136,6 +106,35 @@ pub fn render(img: &mut RgbaImage) {
 }
 
 fn render_(image_size: u32, frame: &mut Frame) {
+    let obj = load_model();
+
+    let mut shadow_map_out = Frame::new(frame.width, frame.height());
+    let shadow_map = {
+        let halfscreen = image_size as f32 / 2.0;
+
+        let camera_pos = Vec3::new(3.0, 0.0, 0.0);
+        // let camera_pos = Vec3::new(1.0, 0.0, 3.0);
+        let model_pos = Vec3::new(0.0, 0.0, 0.0);
+        let model_scale = Vec3::splat(1.0);
+
+        let model = Mat4::from_translation(model_pos)
+            * Mat4::from_scale(model_scale)
+            * Mat4::from_axis_angle(Vec3::X, 0.2);
+        let view = Mat4::look_at_lh(camera_pos, model_pos, Vec3::Y);
+
+        let project = Mat4::perspective_rh(PI * 0.25, 1.0, 0.001, 1.0);
+        let viewport = Mat4::from_translation(Vec3::new(halfscreen, halfscreen, 1.0))
+            * Mat4::from_scale(Vec3::new(halfscreen, -halfscreen, 1.0));
+
+        let model_to_screen = viewport * project * view * model;
+        ShadowMap { model_to_screen }
+    };
+    shadow_map.run(&mut shadow_map_out, &obj);
+    let shadow_map_out_size = Vec2::new(
+        shadow_map_out.width() as f32,
+        shadow_map_out.height() as f32,
+    );
+
     let halfscreen = image_size as f32 / 2.0;
 
     let camera_pos = Vec3::new(1.0, 0.0, 3.0);
@@ -148,8 +147,8 @@ fn render_(image_size: u32, frame: &mut Frame) {
     let view = Mat4::look_at_lh(camera_pos, model_pos, Vec3::Y);
 
     let project = Mat4::perspective_rh(PI * 0.25, 1.0, 0.001, 1.0);
-    let viewport = Mat4::from_translation(Vec3::new(halfscreen, halfscreen, halfscreen))
-        * Mat4::from_scale(Vec3::new(halfscreen, -halfscreen, halfscreen));
+    let viewport = Mat4::from_translation(Vec3::new(halfscreen, halfscreen, 1.0))
+        * Mat4::from_scale(Vec3::new(halfscreen, -halfscreen, 1.0));
 
     let model_normal_transform = model.inverse().transpose();
     let model_to_screen = viewport * project * view * model;
@@ -159,16 +158,21 @@ fn render_(image_size: u32, frame: &mut Frame) {
     let texture = texture();
     let texsize = Vec2::new(texture.width() as f32, texture.height() as f32);
 
-    let shader = Gourad {
+    // shadow_map.run(frame, &obj);
+
+    let shader = Main {
         model_to_screen,
         model_normal_transform,
         texture,
         tangent_space_normal_map: tangent_space_normal_map(),
         light_direction,
         texsize,
+        shadow_map,
+        shadow_map_out,
+        shadow_map_out_size,
     };
     shader.assert_valid();
-    shader.run(frame, &load_model())
+    shader.run(frame, &obj)
 }
 
 struct Frame {
@@ -192,8 +196,17 @@ impl Frame {
     fn get_mut(&mut self, x: u32, y: u32) -> &mut Vec4 {
         let (x, y) = (x as usize, y as usize);
         debug_assert!(x < self.width);
-        debug_assert!(y < self.pix.len() / self.width);
+        debug_assert!(y < self.height());
         self.pix.get_mut(x + y * self.width).unwrap()
+    }
+
+    fn try_get(&self, x: u32, y: u32) -> Option<&Vec4> {
+        let (x, y) = (x as usize, y as usize);
+        if x >= self.width || y >= self.height() {
+            None
+        } else {
+            Some(&self.pix[x + y * self.width])
+        }
     }
 
     fn write(&self, img: &mut RgbaImage) {
@@ -209,6 +222,10 @@ impl Frame {
 
     fn height(&self) -> usize {
         self.pix.len() / self.width
+    }
+
+    fn width(&self) -> usize {
+        self.width
     }
 }
 
@@ -256,7 +273,7 @@ trait Shader {
     }
 }
 
-impl Gourad {
+impl Main {
     fn assert_valid(&self) {
         assert_eq!(
             (self.texture.width(), self.texture.height()),
@@ -270,19 +287,27 @@ impl Gourad {
             self.texsize,
             Vec2::new(self.texture.width() as f32, self.texture.height() as f32)
         );
+        assert_eq!(
+            self.shadow_map_out_size,
+            Vec2::new(
+                self.shadow_map_out.width() as f32,
+                self.shadow_map_out.height() as f32
+            )
+        );
     }
 }
 
 #[derive(Clone)]
-struct GouradVarying {
+struct MainVarying {
     normal: Vec3,
     uv: Vec2,
     pos: Vec3,
+    shadow_pos: Vec3,
 }
 
-impl Copy for GouradVarying {}
+impl Copy for MainVarying {}
 
-impl Mul<f32> for GouradVarying {
+impl Mul<f32> for MainVarying {
     type Output = Self;
 
     fn mul(self, rhs: f32) -> Self::Output {
@@ -290,11 +315,12 @@ impl Mul<f32> for GouradVarying {
             normal: self.normal * rhs,
             uv: self.uv * rhs,
             pos: self.pos * rhs,
+            shadow_pos: self.shadow_pos * rhs,
         }
     }
 }
 
-impl Add for GouradVarying {
+impl Add for MainVarying {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self {
@@ -302,17 +328,18 @@ impl Add for GouradVarying {
             normal: self.normal + rhs.normal,
             uv: self.uv + rhs.uv,
             pos: self.pos + rhs.pos,
+            shadow_pos: self.shadow_pos + rhs.shadow_pos,
         }
     }
 }
 
 #[derive(Clone)]
-struct GouradIntermediate {
+struct MainIntermediate {
     uv: Vec2,
     pos: Vec3,
 }
 
-impl Copy for GouradIntermediate {}
+impl Copy for MainIntermediate {}
 
 fn bary_interp<T>(bar: Vec3, pts: [T; 3]) -> T
 where
@@ -374,7 +401,7 @@ fn normal(triangle: [Vec3; 3]) -> Vec3 {
 // (position, texure coords, normal)
 fn load_model() -> Vec<([(Vec3, Vec2, Vec3); 3])> {
     let obj = parse_obj(Cursor::new(include_bytes!(
-        "./obj/african_head/african_head.obj"
+        "./obj/diablo3_pose/diablo3_pose.obj"
     )))
     .unwrap();
     let mut ret = Vec::<[(Vec3, Vec2, Vec3); 3]>::new();
@@ -413,7 +440,7 @@ fn load_model() -> Vec<([(Vec3, Vec2, Vec3); 3])> {
 }
 
 fn texture() -> image::Rgb32FImage {
-    let bs = include_bytes!("./obj/african_head/african_head_diffuse.png");
+    let bs = include_bytes!("./obj/diablo3_pose/diablo3_pose_diffuse.png");
     let mut tex = image::load_from_memory_with_format(bs, ImageFormat::Png)
         .unwrap()
         .to_rgb32f();
@@ -422,7 +449,7 @@ fn texture() -> image::Rgb32FImage {
 }
 
 fn tangent_space_normal_map() -> image::Rgb32FImage {
-    let bs = include_bytes!("./obj/african_head/african_head_nm_tangent.png");
+    let bs = include_bytes!("./obj/diablo3_pose/diablo3_pose_nm_tangent.png");
     let mut tex = image::load_from_memory_with_format(bs, ImageFormat::Png)
         .unwrap()
         .to_rgb32f();
@@ -433,4 +460,48 @@ fn tangent_space_normal_map() -> image::Rgb32FImage {
         p.0 = v.normalize().into();
     }
     tex
+}
+
+#[derive(Clone)]
+struct Nothing;
+
+impl Copy for Nothing {}
+
+impl Mul<f32> for Nothing {
+    type Output = Self;
+
+    fn mul(self, _: f32) -> Self::Output {
+        Self
+    }
+}
+
+impl Add for Nothing {
+    type Output = Self;
+
+    fn add(self, _: Self) -> Self {
+        Self
+    }
+}
+
+// I don't understand this math.
+fn from_tangent_space(
+    uvs: [Vec2; 3],
+    base_normal: Vec3,
+    tangent_space_normal: Vec3,
+    verts_screenspace: [Vec3; 3],
+) -> Vec3 {
+    debug_assert!(is_normalized(base_normal));
+    debug_assert!(is_normalized(tangent_space_normal));
+
+    let ai = Mat3::from_cols(
+        verts_screenspace[1] - verts_screenspace[0],
+        verts_screenspace[2] - verts_screenspace[0],
+        base_normal,
+    )
+    .transpose()
+    .inverse();
+    let i: Vec3 = ai * Vec3::new(uvs[1].x - uvs[0].x, uvs[2].x - uvs[0].x, 0.0);
+    let j: Vec3 = ai * Vec3::new(uvs[1].y - uvs[0].y, uvs[2].y - uvs[0].y, 0.0);
+
+    Mat3::from_cols(i.normalize(), j.normalize(), base_normal) * tangent_space_normal
 }
