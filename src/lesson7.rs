@@ -1,21 +1,19 @@
 use std::{
     f32::consts::PI,
     io::Cursor,
-    ops::{Add, Mul, Neg},
+    ops::{Add, Mul},
 };
 
 use crate::common::to_pixel;
 
-use glam::{Mat3, Mat4, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+use glam::{Mat4, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 use image::{imageops::flip_vertical_in_place, ImageFormat, RgbaImage};
 use obj::raw::{object::Polygon, parse_obj};
 use tap::Conv;
 
 struct Main {
     model_to_screen: Mat4,
-    model_normal_transform: Mat4,
     texture: image::Rgb32FImage,
-    tangent_space_normal_map: image::Rgb32FImage,
     texsize: Vec2,
     light_direction: Vec3,
     shadow_map: ShadowMap,
@@ -25,44 +23,26 @@ struct Main {
 
 impl Shader for Main {
     type Varying = MainVarying;
-    type Intermediate = MainIntermediate;
+    type Intermediate = Nothing;
 
-    fn vertex(
-        &self,
-        vert: Vec3,
-        normal: Vec3,
-        uv: Vec2,
-    ) -> (Vec3, Self::Varying, Self::Intermediate) {
+    fn vertex(&self, vert: Vec3, _: Vec3, uv: Vec2) -> (Vec3, Self::Varying, Self::Intermediate) {
         let pos = self.model_to_screen.project_point3(vert);
         let shadow_pos = self.shadow_map.model_to_screen.project_point3(vert);
-        let normal = self.model_normal_transform.transform_vector3(normal);
         (
             pos,
             MainVarying {
-                normal,
                 uv,
                 pos,
                 shadow_pos,
             },
-            MainIntermediate { uv, pos },
+            Nothing,
         )
     }
 
-    fn fragment(&self, interp: Self::Varying, interm: [Self::Intermediate; 3]) -> Option<Vec3> {
+    fn fragment(&self, interp: Self::Varying, _: [Self::Intermediate; 3]) -> Option<Vec3> {
         let uvt = interp.uv * self.texsize;
         let (px, py) = (uvt.x as u32, uvt.y as u32);
         let color: Vec3 = self.texture.get_pixel(px, py).0.conv::<Vec3>();
-        let tangent_space_normal: Vec3 = self.tangent_space_normal_map.get_pixel(px, py).0.into();
-
-        let diff = from_tangent_space(
-            interm.map(|i| i.uv),
-            interp.normal.normalize(),
-            tangent_space_normal,
-            interm.map(|i| i.pos),
-        )
-        .dot(self.light_direction)
-        .neg()
-        .max(0.0);
 
         let mut brightness = 0.4;
 
@@ -113,7 +93,6 @@ fn render_(image_size: u32, frame: &mut Frame) {
         let halfscreen = image_size as f32 / 2.0;
 
         let camera_pos = Vec3::new(3.0, 0.0, 0.0);
-        // let camera_pos = Vec3::new(1.0, 0.0, 3.0);
         let model_pos = Vec3::new(0.0, 0.0, 0.0);
         let model_scale = Vec3::splat(1.0);
 
@@ -150,7 +129,6 @@ fn render_(image_size: u32, frame: &mut Frame) {
     let viewport = Mat4::from_translation(Vec3::new(halfscreen, halfscreen, 1.0))
         * Mat4::from_scale(Vec3::new(halfscreen, -halfscreen, 1.0));
 
-    let model_normal_transform = model.inverse().transpose();
     let model_to_screen = viewport * project * view * model;
 
     let light_direction = Vec3::new(-1.0, -1.0, -1.0).normalize();
@@ -158,13 +136,9 @@ fn render_(image_size: u32, frame: &mut Frame) {
     let texture = texture();
     let texsize = Vec2::new(texture.width() as f32, texture.height() as f32);
 
-    // shadow_map.run(frame, &obj);
-
     let shader = Main {
         model_to_screen,
-        model_normal_transform,
         texture,
-        tangent_space_normal_map: tangent_space_normal_map(),
         light_direction,
         texsize,
         shadow_map,
@@ -275,13 +249,6 @@ trait Shader {
 
 impl Main {
     fn assert_valid(&self) {
-        assert_eq!(
-            (self.texture.width(), self.texture.height()),
-            (
-                self.tangent_space_normal_map.width(),
-                self.tangent_space_normal_map.height()
-            )
-        );
         assert!(is_normalized(self.light_direction));
         assert_eq!(
             self.texsize,
@@ -299,7 +266,6 @@ impl Main {
 
 #[derive(Clone)]
 struct MainVarying {
-    normal: Vec3,
     uv: Vec2,
     pos: Vec3,
     shadow_pos: Vec3,
@@ -312,7 +278,6 @@ impl Mul<f32> for MainVarying {
 
     fn mul(self, rhs: f32) -> Self::Output {
         Self {
-            normal: self.normal * rhs,
             uv: self.uv * rhs,
             pos: self.pos * rhs,
             shadow_pos: self.shadow_pos * rhs,
@@ -325,21 +290,12 @@ impl Add for MainVarying {
 
     fn add(self, rhs: Self) -> Self {
         Self {
-            normal: self.normal + rhs.normal,
             uv: self.uv + rhs.uv,
             pos: self.pos + rhs.pos,
             shadow_pos: self.shadow_pos + rhs.shadow_pos,
         }
     }
 }
-
-#[derive(Clone)]
-struct MainIntermediate {
-    uv: Vec2,
-    pos: Vec3,
-}
-
-impl Copy for MainIntermediate {}
 
 fn bary_interp<T>(bar: Vec3, pts: [T; 3]) -> T
 where
@@ -448,20 +404,6 @@ fn texture() -> image::Rgb32FImage {
     tex
 }
 
-fn tangent_space_normal_map() -> image::Rgb32FImage {
-    let bs = include_bytes!("./obj/diablo3_pose/diablo3_pose_nm_tangent.png");
-    let mut tex = image::load_from_memory_with_format(bs, ImageFormat::Png)
-        .unwrap()
-        .to_rgb32f();
-    flip_vertical_in_place(&mut tex);
-    for p in tex.pixels_mut() {
-        let mut v: Vec3 = p.0.into();
-        v = v * 2.0 - 1.0;
-        p.0 = v.normalize().into();
-    }
-    tex
-}
-
 #[derive(Clone)]
 struct Nothing;
 
@@ -481,27 +423,4 @@ impl Add for Nothing {
     fn add(self, _: Self) -> Self {
         Self
     }
-}
-
-// I don't understand this math.
-fn from_tangent_space(
-    uvs: [Vec2; 3],
-    base_normal: Vec3,
-    tangent_space_normal: Vec3,
-    verts_screenspace: [Vec3; 3],
-) -> Vec3 {
-    debug_assert!(is_normalized(base_normal));
-    debug_assert!(is_normalized(tangent_space_normal));
-
-    let ai = Mat3::from_cols(
-        verts_screenspace[1] - verts_screenspace[0],
-        verts_screenspace[2] - verts_screenspace[0],
-        base_normal,
-    )
-    .transpose()
-    .inverse();
-    let i: Vec3 = ai * Vec3::new(uvs[1].x - uvs[0].x, uvs[2].x - uvs[0].x, 0.0);
-    let j: Vec3 = ai * Vec3::new(uvs[1].y - uvs[0].y, uvs[2].y - uvs[0].y, 0.0);
-
-    Mat3::from_cols(i.normalize(), j.normalize(), base_normal) * tangent_space_normal
 }
