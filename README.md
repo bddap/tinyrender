@@ -3,6 +3,11 @@ Me working throught the wonderful
 
 Thank's @ssloy :)
 
+## Structure
+
+You may notice the code here has an odd structure, each "lesson" is nearly self-contained.
+Utilities like the `Shader` trait are redeclared in each module.
+
 ## License
 
 Licensed under either of
