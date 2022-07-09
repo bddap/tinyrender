@@ -1,35 +1,35 @@
 use image::RgbaImage;
 use itertools::Itertools;
-use std::mem::size_of;
+use std::{mem::size_of, num::NonZeroU32};
 use wgpu::{Buffer, BufferView, Device, SubmissionIndex};
 
 pub fn render(img: &mut RgbaImage) {
-    pollster::block_on(run(img));
+    pollster::block_on(render_async(img));
 }
 
-async fn run(img: &mut RgbaImage) {
+async fn render_async(img: &mut RgbaImage) {
     let (device, buffer, _, submission_index) =
         create_red_image_with_dimensions(img.width() as usize, img.height() as usize).await;
-    create_png(img, device, buffer, submission_index).await;
+    copy_img(img, device, buffer, submission_index).await;
 }
 
 async fn create_red_image_with_dimensions(
     width: usize,
     height: usize,
 ) -> (Device, Buffer, BufferDimensions, SubmissionIndex) {
-    let adapter = wgpu::Instance::new(
-        wgpu::util::backend_bits_from_env().unwrap_or_else(wgpu::Backends::all),
-    )
-    .request_adapter(&wgpu::RequestAdapterOptions::default())
-    .await
-    .unwrap();
+    use wgpu::*;
+
+    let adapter = Instance::new(util::backend_bits_from_env().unwrap_or_else(Backends::all))
+        .request_adapter(&RequestAdapterOptions::default())
+        .await
+        .unwrap();
 
     let (device, queue) = adapter
         .request_device(
-            &wgpu::DeviceDescriptor {
+            &DeviceDescriptor {
                 label: None,
-                features: wgpu::Features::empty(),
-                limits: wgpu::Limits::downlevel_defaults(),
+                features: Features::empty(),
+                limits: Limits::downlevel_defaults(),
             },
             None,
         )
@@ -42,41 +42,40 @@ async fn create_red_image_with_dimensions(
     // https://en.wikipedia.org/wiki/Data_structure_alignment#Computing_padding
     let buffer_dimensions = BufferDimensions::new(width, height);
     // The output buffer lets us retrieve the data as an array
-    let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+    let output_buffer = device.create_buffer(&BufferDescriptor {
         label: None,
         size: (buffer_dimensions.padded_bytes_per_row() * buffer_dimensions.height) as u64,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
 
-    let texture_extent = wgpu::Extent3d {
+    let texture_extent = Extent3d {
         width: buffer_dimensions.width as u32,
         height: buffer_dimensions.height as u32,
         depth_or_array_layers: 1,
     };
 
     // The render pipeline renders data into this texture
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
+    let texture = device.create_texture(&TextureDescriptor {
         size: texture_extent,
         mip_level_count: 1,
         sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8UnormSrgb,
+        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
         label: None,
     });
 
     // Set the background to be red
     let command_buffer = {
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+        encoder.begin_render_pass(&RenderPassDescriptor {
             label: None,
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &texture.create_view(&wgpu::TextureViewDescriptor::default()),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: &texture.create_view(&TextureViewDescriptor::default()),
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::RED),
+                ops: Operations {
+                    load: LoadOp::Clear(Color::RED),
                     store: true,
                 },
             })],
@@ -86,13 +85,12 @@ async fn create_red_image_with_dimensions(
         // Copy the data from the texture to the buffer
         encoder.copy_texture_to_buffer(
             texture.as_image_copy(),
-            wgpu::ImageCopyBuffer {
+            ImageCopyBuffer {
                 buffer: &output_buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: ImageDataLayout {
                     offset: 0,
                     bytes_per_row: Some(
-                        std::num::NonZeroU32::new(buffer_dimensions.padded_bytes_per_row() as u32)
-                            .unwrap(),
+                        NonZeroU32::new(buffer_dimensions.padded_bytes_per_row() as u32).unwrap(),
                     ),
                     rows_per_image: None,
                 },
@@ -107,7 +105,8 @@ async fn create_red_image_with_dimensions(
     (device, output_buffer, buffer_dimensions, index)
 }
 
-async fn create_png(
+/// move image from output_buffer into img
+async fn copy_img(
     img: &mut RgbaImage,
     device: Device,
     output_buffer: Buffer,
@@ -161,17 +160,27 @@ impl BufferDimensions {
         Self { width, height }
     }
 
-    fn padded_bytes_per_row(&self) -> usize {
+    fn padding(&self) -> usize {
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
         let bytes_per_pixel = size_of::<u32>();
         let unpadded_bytes_per_row = self.width * bytes_per_pixel;
-        let padded_bytes_per_row_padding = (align - unpadded_bytes_per_row % align) % align;
-        unpadded_bytes_per_row + padded_bytes_per_row_padding
+        (align - unpadded_bytes_per_row % align) % align
+    }
+
+    fn padded_bytes_per_row(&self) -> usize {
+        let bytes_per_pixel = size_of::<u32>();
+        self.width * bytes_per_pixel + self.padding()
     }
 
     fn rows_no_padding<'a>(&self, padded_buffer: &'a BufferView) -> impl Iterator<Item = &'a [u8]> {
+        assert_eq!(
+            padded_buffer.len(),
+            self.padded_bytes_per_row() * self.height
+        );
+
         let bytes_per_pixel = size_of::<u32>();
         let width = self.width;
+
         padded_buffer
             .chunks(self.padded_bytes_per_row())
             .map(move |padded_row| &padded_row[..width * bytes_per_pixel])
