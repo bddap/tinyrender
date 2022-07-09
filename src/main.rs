@@ -21,6 +21,7 @@ mod lesson7;
 mod lesson8;
 mod lesson8b;
 mod lesson8c;
+mod lesson9;
 
 use consts::*;
 use structopt::StructOpt;
@@ -44,6 +45,7 @@ pub const RENDERS: &[for<'r> fn(&'r mut ImageBuffer<Rgba<u8>, Vec<u8>>)] = &[
     lesson8::render,
     lesson8b::render,
     lesson8c::render,
+    lesson9::render,
 ];
 
 #[derive(structopt::StructOpt)]
@@ -52,7 +54,7 @@ struct Args {
     #[structopt(short, long)]
     output: PathBuf,
 
-    #[structopt(short, long, default_value = "2160")]
+    #[structopt(short, long, default_value = "2048")]
     size: u32,
 
     /// which render to run, default latest
@@ -61,6 +63,8 @@ struct Args {
 }
 
 fn main() {
+    env_logger::init();
+
     let args = Args::from_args();
     let lesson = RENDERS
         .get(args.render.unwrap_or(RENDERS.len()).saturating_sub(1))
