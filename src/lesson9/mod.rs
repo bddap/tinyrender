@@ -1,6 +1,6 @@
 use image::RgbaImage;
 use itertools::Itertools;
-use std::{mem::size_of, num::NonZeroU32};
+use std::{borrow::Cow, mem::size_of, num::NonZeroU32};
 use wgpu::{Buffer, BufferView, Device, SubmissionIndex};
 
 pub fn render(img: &mut RgbaImage) {
@@ -66,21 +66,82 @@ async fn create_red_image_with_dimensions(
         label: None,
     });
 
-    // Set the background to be red
+    let shader = device.create_shader_module(ShaderModuleDescriptor {
+        label: None,
+        source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
+    });
+
+    let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("Render Pipeline Layout"),
+        bind_group_layouts: &[],
+        push_constant_ranges: &[],
+    });
+
+    let render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+        label: Some("Render Pipeline"),
+        layout: Some(&render_pipeline_layout),
+        vertex: VertexState {
+            module: &shader,
+            entry_point: "vs_main", // 1.
+            buffers: &[],           // 2.
+        },
+        fragment: Some(FragmentState {
+            // 3.
+            module: &shader,
+            entry_point: "fs_main",
+            targets: &[Some(ColorTargetState {
+                // 4.
+                format: TextureFormat::Rgba8UnormSrgb,
+                blend: Some(BlendState::REPLACE),
+                write_mask: ColorWrites::ALL,
+            })],
+        }),
+        primitive: PrimitiveState {
+            topology: PrimitiveTopology::TriangleList, // 1. // can maybe change to PointList
+            strip_index_format: None,
+            front_face: FrontFace::Ccw, // 2.
+            cull_mode: Some(Face::Back),
+            // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+            polygon_mode: wgpu::PolygonMode::Fill,
+            // Requires Features::DEPTH_CLIP_CONTROL
+            unclipped_depth: false,
+            // Requires Features::CONSERVATIVE_RASTERIZATION
+            conservative: false,
+        },
+        depth_stencil: None, // 1.
+        multisample: MultisampleState {
+            count: 1,                         // 2.
+            mask: !0,                         // 3.
+            alpha_to_coverage_enabled: false, // 4.
+        },
+        multiview: None, // 5.
+    });
+
     let command_buffer = {
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-        encoder.begin_render_pass(&RenderPassDescriptor {
-            label: None,
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: &texture.create_view(&TextureViewDescriptor::default()),
-                resolve_target: None,
-                ops: Operations {
-                    load: LoadOp::Clear(Color::RED),
-                    store: true,
-                },
-            })],
-            depth_stencil_attachment: None,
-        });
+        let texture_view = texture.create_view(&TextureViewDescriptor::default());
+        {
+            let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(RenderPassColorAttachment {
+                    view: &texture_view,
+                    resolve_target: None,
+                    ops: Operations {
+                        load: LoadOp::Clear(Color {
+                            r: 0.8,
+                            g: 0.2,
+                            b: 0.2,
+                            a: 1.0,
+                        }),
+                        store: true,
+                    },
+                })],
+                depth_stencil_attachment: None,
+            });
+
+            render_pass.set_pipeline(&render_pipeline); // 2.
+            render_pass.draw(0..3, 0..1); // 3.
+        }
 
         // Copy the data from the texture to the buffer
         encoder.copy_texture_to_buffer(
