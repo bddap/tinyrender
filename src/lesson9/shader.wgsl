@@ -1,3 +1,11 @@
+struct VertexInput {
+    @location(0) loc: vec3<f32>,
+};
+
+struct InstanceInput {
+    @location(1) loc: vec3<f32>,
+};
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
 };
@@ -5,6 +13,7 @@ struct VertexOutput {
 @vertex
 fn vs_main(
     @builtin(vertex_index) in_vertex_index: u32,
+	instance: InstanceInput,
 ) -> VertexOutput {
     var out: VertexOutput;
     let x = f32(1 - i32(in_vertex_index)) * 0.5;

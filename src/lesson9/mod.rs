@@ -1,6 +1,7 @@
 use image::RgbaImage;
 use itertools::Itertools;
 use std::{borrow::Cow, mem::size_of, num::NonZeroU32};
+use wgpu::util::DeviceExt;
 use wgpu::*;
 use wgpu::{Buffer, BufferView, Device};
 
@@ -9,7 +10,10 @@ pub fn render(img: &mut RgbaImage) {
 }
 
 async fn render_async(img: &mut RgbaImage) {
-    let pipeline = Pipeline::create(img.width() as usize, img.height() as usize).await;
+    let mut pipeline = Pipeline::create(img.width() as usize, img.height() as usize).await;
+    pipeline.upload_data(&[InstanceInput {
+        loc: [0.0, 0.0, 0.0],
+    }]);
     pipeline.render(img).await;
 }
 
@@ -21,6 +25,9 @@ struct Pipeline {
     texture_extent: Extent3d,
     texture: Texture,
     render_pipeline: RenderPipeline,
+    instance_buffer: Buffer,
+    instance_count: u32,
+    // vertex_buffer: Buffer,
 }
 
 impl Pipeline {
@@ -82,7 +89,10 @@ impl Pipeline {
             vertex: VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[],
+                buffers: &[
+                    // VertexInput::desc(),
+                    InstanceInput::desc(),
+                ],
             },
             fragment: Some(FragmentState {
                 module: &shader,
@@ -111,6 +121,24 @@ impl Pipeline {
             multiview: None,
         });
 
+        // let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        //     label: Some("Vertex Buffer"),
+        //     contents: &[
+        //         VertexInput(Default::default()),
+        //         VertexInput(Default::default()),
+        //         VertexInput(Default::default()),
+        //     ],
+        //     usage: wgpu::BufferUsages::VERTEX,
+        // });
+
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: &[],
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let instance_count: u32 = 0;
+
         Self {
             device,
             queue,
@@ -119,7 +147,22 @@ impl Pipeline {
             texture_extent,
             texture,
             render_pipeline,
+            // vertex_buffer,
+            instance_buffer,
+            instance_count,
         }
+    }
+
+    fn upload_data(&mut self, data: &[InstanceInput]) {
+        self.instance_buffer.destroy();
+        self.instance_count = data.len().try_into().unwrap();
+        self.instance_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: bytemuck::cast_slice(&data),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
     }
 
     async fn render(&self, img: &mut RgbaImage) {
@@ -148,7 +191,12 @@ impl Pipeline {
                 });
 
                 render_pass.set_pipeline(&self.render_pipeline);
-                render_pass.draw(0..3, 0..1);
+                // render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                render_pass
+                    .set_index_buffer(self.instance_buffer.slice(..), wgpu::IndexFormat::Uint16);
+
+                render_pass.draw_indexed(0..3, 0, 0..self.instance_count);
             }
 
             encoder.copy_texture_to_buffer(
@@ -186,6 +234,44 @@ impl Pipeline {
 
         drop(padded_buffer);
         self.output_buffer.unmap();
+    }
+}
+
+// #[repr(C)]
+// #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+// struct VertexInput([f32; 3]);
+
+// impl VertexInput {
+//     fn desc() -> wgpu::VertexBufferLayout<'static> {
+//         wgpu::VertexBufferLayout {
+//             array_stride: core::mem::size_of::<Self>() as wgpu::BufferAddress,
+//             step_mode: wgpu::VertexStepMode::Vertex,
+//             attributes: &[wgpu::VertexAttribute {
+//                 offset: 0,
+//                 shader_location: 0,
+//                 format: wgpu::VertexFormat::Float32x3,
+//             }],
+//         }
+//     }
+// }
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct InstanceInput {
+    loc: [f32; 3],
+}
+
+impl InstanceInput {
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: core::mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &[wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 1,
+                format: wgpu::VertexFormat::Float32x3,
+            }],
+        }
     }
 }
 
