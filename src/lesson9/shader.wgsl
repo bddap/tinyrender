@@ -1,7 +1,3 @@
-struct VertexInput {
-    @location(0) loc: vec3<f32>,
-};
-
 struct InstanceInput {
     @location(1) loc: vec3<f32>,
 };

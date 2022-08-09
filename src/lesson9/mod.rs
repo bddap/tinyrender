@@ -12,7 +12,7 @@ pub fn render(img: &mut RgbaImage) {
 async fn render_async(img: &mut RgbaImage) {
     let mut pipeline = Pipeline::create(img.width() as usize, img.height() as usize).await;
     pipeline.upload_data(&[InstanceInput {
-        loc: [0.0, 0.0, 0.0],
+        loc: [1.0, 0.0, 0.0],
     }]);
     pipeline.render(img).await;
 }
@@ -27,7 +27,7 @@ struct Pipeline {
     render_pipeline: RenderPipeline,
     instance_buffer: Buffer,
     instance_count: u32,
-    // vertex_buffer: Buffer,
+    index_buffer: Buffer,
 }
 
 impl Pipeline {
@@ -89,10 +89,7 @@ impl Pipeline {
             vertex: VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[
-                    // VertexInput::desc(),
-                    InstanceInput::desc(),
-                ],
+                buffers: &[InstanceInput::desc()],
             },
             fragment: Some(FragmentState {
                 module: &shader,
@@ -121,20 +118,16 @@ impl Pipeline {
             multiview: None,
         });
 
-        // let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        //     label: Some("Vertex Buffer"),
-        //     contents: &[
-        //         VertexInput(Default::default()),
-        //         VertexInput(Default::default()),
-        //         VertexInput(Default::default()),
-        //     ],
-        //     usage: wgpu::BufferUsages::VERTEX,
-        // });
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(&[0u16, 1u16, 2u16]),
+            usage: wgpu::BufferUsages::INDEX,
+        });
 
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: &[],
-            usage: wgpu::BufferUsages::VERTEX,
+            usage: wgpu::BufferUsages::INDEX,
         });
 
         let instance_count: u32 = 0;
@@ -147,9 +140,9 @@ impl Pipeline {
             texture_extent,
             texture,
             render_pipeline,
-            // vertex_buffer,
             instance_buffer,
             instance_count,
+            index_buffer,
         }
     }
 
@@ -161,7 +154,7 @@ impl Pipeline {
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Instance Buffer"),
                 contents: bytemuck::cast_slice(&data),
-                usage: wgpu::BufferUsages::VERTEX,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::INDEX,
             });
     }
 
@@ -192,9 +185,9 @@ impl Pipeline {
 
                 render_pass.set_pipeline(&self.render_pipeline);
                 // render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                render_pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
                 render_pass
-                    .set_index_buffer(self.instance_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
                 render_pass.draw_indexed(0..3, 0, 0..self.instance_count);
             }
@@ -236,24 +229,6 @@ impl Pipeline {
         self.output_buffer.unmap();
     }
 }
-
-// #[repr(C)]
-// #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-// struct VertexInput([f32; 3]);
-
-// impl VertexInput {
-//     fn desc() -> wgpu::VertexBufferLayout<'static> {
-//         wgpu::VertexBufferLayout {
-//             array_stride: core::mem::size_of::<Self>() as wgpu::BufferAddress,
-//             step_mode: wgpu::VertexStepMode::Vertex,
-//             attributes: &[wgpu::VertexAttribute {
-//                 offset: 0,
-//                 shader_location: 0,
-//                 format: wgpu::VertexFormat::Float32x3,
-//             }],
-//         }
-//     }
-// }
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
