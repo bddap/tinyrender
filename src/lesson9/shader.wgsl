@@ -1,5 +1,6 @@
 struct InstanceInput {
-    @location(1) loc: vec3<f32>,
+    @location(0) loc: vec3<f32>,
+    @location(1) scale: f32,
 };
 
 struct VertexOutput {
@@ -12,9 +13,19 @@ fn vs_main(
 	instance: InstanceInput,
 ) -> VertexOutput {
     var out: VertexOutput;
-    let x = f32(1 - i32(in_vertex_index)) * 0.5;
-    let y = f32(i32(in_vertex_index & 1u) * 2 - 1) * 0.5;
-    out.clip_position = vec4<f32>(x, y, 0.0, 1.0);
+
+    // triangle strip quad
+    // 0: [-1, -1]
+    // 1: [ 1, -1]
+    // 2: [ 1,  1]
+    // 3: [-1,  1]
+    // 4: [-1, -1]
+    let x = f32(i32(((in_vertex_index + 1u) / 2u) & 1u) * 2 - 1);
+    let y = f32(i32((in_vertex_index / 2u) & 1u) * 2 - 1);
+
+    let p = vec3<f32>(x, y, 0.0) * instance.scale + instance.loc;
+
+    out.clip_position = vec4<f32>(p, 1.0);
     return out;
 }
 

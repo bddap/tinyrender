@@ -11,9 +11,16 @@ pub fn render(img: &mut RgbaImage) {
 
 async fn render_async(img: &mut RgbaImage) {
     let mut pipeline = Pipeline::create(img.width() as usize, img.height() as usize).await;
-    pipeline.upload_data(&[InstanceInput {
-        loc: [1.0, 0.0, 0.0],
-    }]);
+    pipeline.upload_data(&[
+        InstanceInput {
+            loc: [0.1, 0.0, 0.0],
+            scale: 0.4,
+        },
+        InstanceInput {
+            loc: [-0.5, -0.3, 0.0],
+            scale: 0.3,
+        },
+    ]);
     pipeline.render(img).await;
 }
 
@@ -101,7 +108,7 @@ impl Pipeline {
                 })],
             }),
             primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
+                topology: PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
                 front_face: FrontFace::Ccw,
                 cull_mode: Some(Face::Back),
@@ -120,7 +127,7 @@ impl Pipeline {
 
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(&[0u16, 1u16, 2u16]),
+            contents: bytemuck::cast_slice(&[0u16, 1, 2, 3, 4]),
             usage: wgpu::BufferUsages::INDEX,
         });
 
@@ -189,7 +196,7 @@ impl Pipeline {
                 render_pass
                     .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
-                render_pass.draw_indexed(0..3, 0, 0..self.instance_count);
+                render_pass.draw_indexed(0..5, 0, 0..self.instance_count);
             }
 
             encoder.copy_texture_to_buffer(
@@ -234,18 +241,27 @@ impl Pipeline {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceInput {
     loc: [f32; 3],
+    scale: f32,
 }
 
 impl InstanceInput {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
+        const ATTRIBUTES: &[wgpu::VertexAttribute] = &[
+            wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: wgpu::VertexFormat::Float32x3.size(),
+                shader_location: 1,
+                format: wgpu::VertexFormat::Float32,
+            },
+        ];
         wgpu::VertexBufferLayout {
             array_stride: core::mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &[wgpu::VertexAttribute {
-                offset: 0,
-                shader_location: 1,
-                format: wgpu::VertexFormat::Float32x3,
-            }],
+            attributes: ATTRIBUTES,
         }
     }
 }
