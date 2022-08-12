@@ -5,6 +5,7 @@ struct InstanceInput {
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
 };
 
 @vertex
@@ -23,13 +24,18 @@ fn vs_main(
     let x = f32(i32(((in_vertex_index + 1u) / 2u) & 1u) * 2 - 1);
     let y = f32(i32((in_vertex_index / 2u) & 1u) * 2 - 1);
 
-    let p = vec3<f32>(x, y, 0.0) * instance.scale + instance.loc;
+    let uv = vec2<f32>(x, y);
+    let p = vec3<f32>(uv, 0.0) * instance.scale + instance.loc;
 
     out.clip_position = vec4<f32>(p, 1.0);
+    out.uv = uv;
     return out;
 }
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(0.15, 0.1, 0.05, 1.0);
+fn fs_main(inp: VertexOutput) -> @location(0) vec4<f32> {
+    if dot(inp.uv, inp.uv) > 1f {
+        discard;
+    }
+    return vec4<f32>(0.15, inp.uv / 2f + 0.5, 1.0);
 }
