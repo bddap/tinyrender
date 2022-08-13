@@ -23,6 +23,7 @@ mod lesson8b;
 mod lesson8c;
 mod lesson9;
 mod lesson9b;
+mod lesson9c;
 
 use consts::*;
 use structopt::StructOpt;
@@ -48,6 +49,7 @@ pub const RENDERS: &[for<'r> fn(&'r mut ImageBuffer<Rgba<u8>, Vec<u8>>)] = &[
     lesson8c::render,
     lesson9::render,
     lesson9b::render,
+    lesson9c::render,
 ];
 
 #[derive(structopt::StructOpt)]
