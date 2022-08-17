@@ -1,7 +1,8 @@
+use flate2::read::GzDecoder;
 use image::RgbaImage;
 use itertools::Itertools;
-use protein_core::structure::Element;
-use std::{borrow::Cow, mem::size_of, num::NonZeroU32};
+use std::{borrow::Cow, io::Cursor, mem::size_of, num::NonZeroU32};
+use tinyrender::{Atom, Element};
 use wgpu::{
     util::DeviceExt, Backends, BlendState, Buffer, BufferDescriptor, BufferUsages, BufferView,
     Color, ColorTargetState, ColorWrites, CommandEncoderDescriptor, CompareFunction,
@@ -20,11 +21,16 @@ pub fn render(img: &mut RgbaImage) {
 
 async fn render_async(img: &mut RgbaImage) {
     let mut pipeline = Pipeline::create(img.width() as usize, img.height() as usize).await;
+    pipeline.upload_data(&read_atoms());
+    pipeline.render(img).await;
+}
 
-    let b: protein_core::Structure = nom_pdb::Parser::parse(include_bytes!("2btv.pdb")).unwrap();
+fn read_atoms() -> Vec<InstanceInput> {
+    let mut reader = GzDecoder::new(Cursor::new(include_bytes!("2btv.bin.gz")));
 
-    let atoms = b.models.iter().flat_map(|model| &model.atoms);
-    let coords = atoms.clone().map(|a| a.coord);
+    let atoms: Vec<Atom> = bincode::deserialize_from(&mut reader).unwrap();
+
+    let coords = atoms.iter().map(|a| a.pos);
     let mut bounds = Bounds::new(coords.clone().next().unwrap_or_default());
     for c in coords {
         bounds.include(c);
@@ -32,14 +38,12 @@ async fn render_async(img: &mut RgbaImage) {
     let longest_side = bounds.longest_side();
     let center = bounds.center();
 
-    // This render seem to have the same shape as that shown on https://www.rcsb.org/structure/2BTV
-    // maybe there is a bug?
-    let instances: Vec<InstanceInput> = atoms
-        .clone()
+    atoms
+        .iter()
         .map(|atom| {
-            let x = (atom.coord[0] - center[0]) / longest_side;
-            let y = (atom.coord[1] - center[1]) / longest_side;
-            let z = (atom.coord[2] - center[2]) / longest_side + 0.5;
+            let x = (atom.pos[0] - center[0]) / longest_side;
+            let y = (atom.pos[1] - center[1]) / longest_side;
+            let z = (atom.pos[2] - center[2]) / longest_side + 0.5;
 
             // atoms outside these bounds still won't render, probably a culling situation
             // I have yet to grasp with wgpu
@@ -48,7 +52,7 @@ async fn render_async(img: &mut RgbaImage) {
 
             InstanceInput {
                 loc: [x, y, z],
-                scale: 0.01,
+                scale: 0.004,
                 color: match atom.element {
                     Element::H => [255, 255, 255],
                     Element::C => [144, 144, 144],
@@ -77,10 +81,7 @@ async fn render_async(img: &mut RgbaImage) {
                 .map(|u: u8| u as f32 / 255.0 / 2.0),
             }
         })
-        .collect();
-
-    pipeline.upload_data(&instances);
-    pipeline.render(img).await;
+        .collect()
 }
 
 struct Bounds {
