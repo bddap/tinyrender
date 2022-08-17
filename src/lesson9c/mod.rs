@@ -41,14 +41,9 @@ fn read_atoms() -> Vec<InstanceInput> {
     atoms
         .iter()
         .map(|atom| {
-            let x = (atom.pos[0] - center[0]) / longest_side;
-            let y = (atom.pos[1] - center[1]) / longest_side;
-            let z = (atom.pos[2] - center[2]) / longest_side + 0.5;
-
-            // atoms outside these bounds still won't render, probably a culling situation
-            // I have yet to grasp with wgpu
-            assert!(z <= 1.0, "{:?}", z);
-            assert!(z >= 0.0, "{:?}", z);
+            let x = (atom.pos[0] - center[0]) / longest_side * 2.0;
+            let y = (atom.pos[1] - center[1]) / longest_side * 2.0;
+            let z = (atom.pos[2] - center[2]) / longest_side * 2.0;
 
             InstanceInput {
                 loc: [x, y, z],
@@ -157,7 +152,7 @@ impl Pipeline {
             .request_device(
                 &DeviceDescriptor {
                     label: None,
-                    features: Features::empty(),
+                    features: Features::DEPTH_CLIP_CONTROL,
                     limits: Limits::downlevel_defaults(),
                 },
                 None,
@@ -222,7 +217,7 @@ impl Pipeline {
                 front_face: FrontFace::Ccw,
                 cull_mode: Some(Face::Back),
                 polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
+                unclipped_depth: true,
                 conservative: false,
             },
             depth_stencil: Some(DepthStencilState {
