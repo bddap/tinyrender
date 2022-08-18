@@ -8,6 +8,31 @@ Thank's @ssloy :)
 You may notice the code here has an odd structure, each "lesson" is nearly self-contained.
 Utilities like the `Shader` trait are redeclared in each module.
 
+## Renders
+
+![](./output/out_0.png)
+![](./output/out_1.png)
+![](./output/out_2.png)
+![](./output/out_3.png)
+![](./output/out_4.png)
+![](./output/out_5.png)
+![](./output/out_6.png)
+![](./output/out_7.png)
+![](./output/out_8.png)
+![](./output/out_9.png)
+![](./output/out_10.png)
+![](./output/out_11.png)
+![](./output/out_12.png)
+![](./output/out_13.png)
+![](./output/out_14.png)
+![](./output/out_15.png)
+![](./output/out_16.png)
+![](./output/out_17.png)
+![](./output/out_18.png)
+![](./output/out_19.png)
+![](./output/out_20.png)
+![](./output/out_21.png)
+
 ## License
 
 Licensed under either of
